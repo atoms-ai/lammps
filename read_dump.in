@@ -2,4 +2,4 @@
 
 region r_whole block 0 100 0 100 0 100 units box
 create_box 2 r_whole
-read_dump dump.1000 1000 x y z add yes box yes label id type
+read_dump dump.1000 1000 x y z vx vy vz add yes box yes label id type
