@@ -1,0 +1,157 @@
+#Written by Sumit Suresh
+#Last edited on Jul12 2020
+
+#Script for impacting a metal nanoparticle over a metal substrate
+
+#---------------------------- Initialisation --------------------------------
+
+units metal
+dimension 3
+boundary p p p
+atom_style atomic
+
+#Read data file
+read_data /gpfs/scratchfs1/sumit/Coldspray/Tantalum_L512/Shapes/L512/Eqb/Merge/sphere_system.data.gz
+
+#Calculate number of atoms
+variable totatoms equal "count(all)"
+
+#Define QCGD parameters
+
+variable loc equal 512
+variable ncg equal ${loc}^3
+
+variable alat equal 3.304
+variable alat_QCGD equal ${alat}*${loc}
+variable cna_cut equal ${alat_QCGD}*1.207     # for bcc systems
+
+
+####### Equilibration ###########
+
+variable T_eqb equal 300.0
+variable vel_eqb equal 600.0
+
+variable T_des equal ${T_eqb}*${ncg}
+variable vel_des equal ${vel_eqb}*${ncg}
+
+####### Skin- cut off ############
+
+variable md_skin equal 2.00
+variable qcgd_skin equal ${md_skin}*${loc}
+
+
+####### Impact velocity ########
+
+#Downward velocity of particle in Å/ps (1 Å/ps = 100 m/s = 0.1 micron/ns )
+variable v_imp equal -8.5
+
+# ------------------------ ASSIGN GROUPS to particle types ------------------------------
+group g_rig type 3
+group g_part type 1
+group g_sub type 2
+group g_damp type 4
+group fullsub subtract all g_part
+
+# ------------------------ FORCE FIELDS ------------------------------
+pair_style      eam/alloy
+pair_coeff      * * Ta_Ra2.L512QCGD.eam.alloy Ta Ta Ta Ta
+
+neighbor ${qcgd_skin} bin
+
+# ------------------------- SETTINGS ---------------------------------
+
+compute commna all cna/atom 2041.82	# for bcc = 1.207*a
+compute csp all centro/atom bcc
+compute spa all stress/atom NULL
+
+compute poteng all pe
+variable pepa equal c_poteng/${totatoms}
+
+#compute temperatures
+compute T_r g_rig temp/com
+compute T_p g_part temp/com
+compute T_d g_damp temp/com
+
+#compute qcgd properties
+#variable T_QCGD equal c_T_LAMMPS/${ncg}
+variable T_rig equal c_T_r/${ncg}
+variable T_damp equal c_T_d/${ncg}
+variable T_part equal c_T_p/${ncg}
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~ Part 1 (Pre-Impact) ~~~~~~~~~~~~~~~~~~~~~~~~~
+# 1 ns
+
+#Change timestep of integration for different levels of QCGD (L512, use 0.5 ps)
+reset_timestep 0
+timestep 0.5
+
+#Freeze rigid layer
+velocity g_rig set 0.0 0.0 0.0 units box
+
+#Giving a downward translation velocity to the particle
+velocity g_part set NULL NULL ${v_imp} units box
+
+
+#dumping trajectory
+
+fix 1 g_rig setforce 0.0 0.0 0.0
+fix 2 g_damp langevin ${T_des} ${T_des} 1.0 699483	# T is set to 512^3 times 300 K ( 1 timestep or 1 ps (2 timesteps))
+fix 3 all nve
+
+#Output the below values for every 100 timesteps
+thermo 100
+thermo_style custom time v_T_rig v_T_damp v_T_part press pe ke etotal v_pepa
+
+
+#dumping trajectory (1 ns - Coarse (before impact) ) - 850 m/s will take 1.17 ns to impact
+
+dump 1 all custom 2000 dump.imp.Ta850mps.* id type x y z vx vy vz c_commna c_csp c_spa[1] c_spa[2] c_spa[3] c_spa[4] c_spa[5] c_spa[6]
+
+run 2000
+
+undump 1
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~ Part 2 (Impact - 0.2 ns resolution for 30 ns more simulation time) ~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#dumping trajectory (1- Fine )
+
+dump 1 all custom 400 dump.imp.Ta850mps.* id type x y z vx vy vz c_commna c_csp c_spa[1] c_spa[2] c_spa[3] c_spa[4] c_spa[5] c_spa[6]
+restart 5000 restart.imp.*
+
+#30 ns
+
+run 60000
+
+undump 1
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~ Part 3 (Impact - 1 ns resolution for 20 ns more (i.e. ~50ns) simulation time - removing non hydrostatic stress tensors (hydstr) starting here) ~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#dumping trajectory (1 ns resolution till 50 ns simulation time)
+
+dump 1 all custom 2000 dump.imp.Ta850mps.hydstr.* id type x y z vx vy vz c_commna c_csp c_spa[1] c_spa[2] c_spa[3]
+restart 5000 restart.imp.*
+
+#30+20 =50ns
+
+run 40000
+
+undump 1
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~ Part 4 (Impact - 2 ns resolution for 50 ns more (i.e. ~100ns) simulation time; coarser timestep (hydstr-coarse) of 1 ps starting here ) ~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+timestep 1.0
+
+#dumping trajectory (Coarser timestep & 2 ns resolution till 100 ns simulation time)
+
+dump 1 all custom 2000 dump.imp.Ta850mps.hydstr-coarse.* id type x y z vx vy vz c_commna c_csp c_spa[1] c_spa[2] c_spa[3]
+restart 10000 restart.imp.*
+
+#50+50 =50ns
+
+run 50000
+
+undump 1
