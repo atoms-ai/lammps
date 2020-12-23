@@ -1,0 +1,93 @@
+units           metal
+dimension       3
+boundary        s s s
+atom_style      atomic
+
+#Configuration file
+read_data      ./Prepare/Ta110.nanopillar.300K
+
+###### definition of the mobile and rigid atoms (bottom and top few atomic layers are type 2 and assigned rigid)
+
+group g_rig type 2
+group g_mobile type 1
+
+# ------------------------ FORCE FIELDS ------------------------------
+pair_style	eam/alloy
+pair_coeff	* * Ta.Ra2.eam Ta Ta
+
+#define some parameters
+
+###### Temperature and naming convention
+variable runTemp equal 300.0            # temperature at which to run the simulation
+variable name string Ta110_compression_${runTemp}K
+
+###### Box dimensions
+variable Lox equal "lx"
+variable Loy equal "ly"
+variable Loz equal "lz"
+
+###### Pillar compression parameters
+variable zstrain equal 0.002  # 0.2% a time
+variable zstep equal 100    # zstrain * zstep = 0.2, i.e. 20 % strain at the end of the simulation run
+variable zdis equal v_Loz*v_zstrain
+variable equi_time equal 2000  # for a timestep of 0.002, this is 4 ps, for a strain rate of 5*10^8 s-1
+
+
+
+###### Computes
+compute spa all stress/atom NULL
+
+############### Compression in a displacement-controlled manner ###############
+
+# Output strain and stress info to file
+# for units metal, pressure is in [bars] = 100 [kPa] = 1/10000 [GPa]
+# p2, p3, p4 are in GPa
+
+variable step equal step
+
+variable p2 equal "-pxx/10000"
+variable p3 equal "-pyy/10000"
+variable p4 equal "-pzz/10000"
+
+variable zl equal "zlo"
+
+
+reset_timestep  0
+timestep .002
+
+
+# Display thermo
+thermo  100
+thermo_style    custom step temp v_p2 v_p3 v_p4 press lx ly lz
+
+dump 1     all custom 4000 dumpfiles/${name}.* id type x y z vx vy vz c_spa[1] c_spa[2] c_spa[3]
+
+############### Compression loop starts here ###############
+
+label loopcompress
+variable d loop ${zstep}
+variable zh equal zhi-(v_d-1)*v_zdis
+
+# define velocity on boundary
+velocity g_rig set NULL NULL 0. units box
+
+# define boundary conditions
+fix 1 g_rig setforce NULL NULL 0.
+
+# apply displacements
+displace_atoms all ramp z 0.0 -${zdis} z ${zl} ${zh}
+
+fix 3 all print 100 " ${step} ${Lox} ${Loy} ${Loz} ${p2} ${p3} ${p4}" append Stress-Strain.def1.dat screen no
+fix 4 all nvt temp ${runTemp} ${runTemp} 0.2
+
+restart 25000 restart_${name}.*
+
+run ${equi_time}
+
+next d
+jump Compression_dispcontrolled.in loopcompress
+
+############### Compression loop ends here ###############
+
+###### Total run time
+###### run 200000      # 0.4 ns
