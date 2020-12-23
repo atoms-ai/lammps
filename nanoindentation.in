@@ -1,0 +1,91 @@
+# ------------------------ INITIALIZATION ----------------------------
+units 		metal
+dimension	3
+boundary	p	p	p
+atom_style	atomic
+
+
+# ----------------------- ATOM DEFINITION ----------------------------
+
+read_data Ta110.nanoindentsetup.300K
+
+group g_subin type 1
+group g_thermbath type 2
+group g_rigidlayer type 3
+
+group g_realsub subtract all g_rigidlayer
+
+# ------------------------ FORCE FIELDS ------------------------------
+pair_style	eam/alloy
+pair_coeff	* * Ta.Ra2.eam Ta Ta Ta
+
+# ------------------------- SETTINGS ---------------------------------
+
+compute Tall g_realsub temp/com
+compute Tsubin g_subin temp/com
+compute Tbath g_thermbath temp/com
+compute spa all stress/atom NULL
+
+# ------------------------- SIMULATION ---------------------------------
+# ---------- Step1 Loading ---------------------
+reset_timestep 0
+timestep 0.002
+
+# fix bottom rigid layer velocities to be zero
+velocity 	g_rigidlayer set 0.0 0.0 0.0
+
+variable xc equal "0.5*(xlo + xhi)"
+variable yc equal "0.5*(ylo + yhi)"
+
+#rate is 30 m/s or 0.3 Å/ps
+variable zt equal vdisplace(650.0,-0.3)
+
+#displacing z value of indenter
+variable zmax equal "650.0-0.3*125.0"
+
+#indentation K value = 1000 ev/nm2 or 10 eV/A2, radius = 40 Angstroms
+
+fix 1 all indent 10.0 sphere v_xc v_yc v_zt 40.0 side out units box
+fix_modify 1 energy yes
+
+fix 2 g_thermbath langevin 300.0 300.0 0.02 16891959
+fix 3 g_rigidlayer setforce 0.0 0.0 0.0
+
+fix 4 all nve
+
+#force values
+variable  fxx  equal  "f_1[1]"
+variable  fyy  equal  "f_1[2]"
+variable  fzz  equal  "f_1[3]"
+
+fix 5 all print 100 "${zt} ${fxx} ${fyy} ${fzz}" file nanoindentation_Ta-110_fdis.txt screen no
+
+
+
+# thermo
+thermo 		100
+thermo_style 	custom time vol press c_Tall c_Tsubin c_Tbath pe ke etotal
+
+# dumping trajectory
+dump            1 all custom 500 dumpfiles/dump.indent8nm.* id type x y z vx vy vz c_spa[1] c_spa[2] c_spa[3]
+restart 62500 restart.*.loading
+
+# 125 ps MD simulation (assuming 2 fs time step)
+run 		62500
+
+unfix 1
+unfix 2
+unfix 3
+unfix 4
+unfix 5
+
+
+# ---------- Step 2 Waiting (if needed stop indenter motion and run nve)  ---------------------
+
+# 12.5 ps MD simulation (assuming 2 fs time step)
+#run 		6250
+
+# ---------- Step 3 Unloading (if needed repeat the process in reverse direction) ---------------------
+
+# 125 ps MD simulation (assuming 2 fs time step)
+# run 		62500
